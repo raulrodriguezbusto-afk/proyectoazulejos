@@ -1,5 +1,3 @@
-
-import os
 import math
 from collections import Counter
 
@@ -9,28 +7,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from matplotlib.backends.backend_pdf import PdfPages
-
-
-def pedir_numero(texto):
-    while True:
-        try:
-            v = float(input(texto).replace(",", "."))
-            if v <= 0:
-                print("Introduce un valor mayor que cero.")
-                continue
-            return v
-        except ValueError:
-            print("Introduce un número válido.")
-
-
-def medida_pared(texto):
-    v = pedir_numero(texto)
-
-    # Permite introducir 1.8 m o 180 cm.
-    if v <= 10:
-        v *= 100
-
-    return v
+import streamlit as st
 
 
 def generar_piezas(ancho, alto, az_ancho, az_alto, junta):
@@ -38,7 +15,6 @@ def generar_piezas(ancho, alto, az_ancho, az_alto, junta):
     paso_x = az_ancho + junta
     paso_y = az_alto + junta
 
-    # Centrar el replanteo en la pared.
     inicio_x = (ancho - az_ancho) / 2
     inicio_y = (alto - az_alto) / 2
 
@@ -52,7 +28,6 @@ def generar_piezas(ancho, alto, az_ancho, az_alto, junta):
         for columna in range(-columnas, columnas + 1):
             x = inicio_x + columna * paso_x
 
-            # Coordenadas visibles dentro de la pared.
             x1 = max(0.0, x)
             y1 = max(0.0, y)
             x2 = min(ancho, x + az_ancho)
@@ -82,13 +57,8 @@ def generar_piezas(ancho, alto, az_ancho, az_alto, junta):
     return piezas
 
 
-def generar_pdf(ancho, alto, az_ancho, az_alto, junta):
-    os.makedirs("planos", exist_ok=True)
-    archivo = os.path.abspath("planos/plano_azulejos.pdf")
-
-    piezas = generar_piezas(
-        ancho, alto, az_ancho, az_alto, junta
-    )
+def generar_pdf_bytes(ancho, alto, az_ancho, az_alto, junta):
+    piezas = generar_piezas(ancho, alto, az_ancho, az_alto, junta)
 
     enteras = sum(p["entera"] for p in piezas)
     cortadas = len(piezas) - enteras
@@ -98,15 +68,14 @@ def generar_pdf(ancho, alto, az_ancho, az_alto, junta):
         for p in piezas if not p["entera"]
     )
 
-    with PdfPages(archivo) as pdf:
+    pdf_path = "plano_azulejos.pdf"
+    with PdfPages(pdf_path) as pdf:
         fig = plt.figure(figsize=(16.5, 11.7))
 
-        # Pared a la izquierda; información a la derecha.
         ax = fig.add_axes([0.07, 0.12, 0.55, 0.76])
         info = fig.add_axes([0.68, 0.10, 0.29, 0.82])
         info.axis("off")
 
-        # Dibujar cada azulejo y su recorte.
         for p in piezas:
             x, y = p["x"], p["y"]
             w, h = p["w"], p["h"]
@@ -118,7 +87,6 @@ def generar_pdf(ancho, alto, az_ancho, az_alto, junta):
                 linewidth=0.7
             ))
 
-            # Las medidas aparecen dentro de cada pieza.
             etiqueta = f'{w:.1f} x {h:.1f} cm'
 
             if w >= 7 and h >= 7:
@@ -130,7 +98,6 @@ def generar_pdf(ancho, alto, az_ancho, az_alto, junta):
                     fontsize=fs, clip_on=True
                 )
             else:
-                # Etiqueta exterior para cortes muy estrechos.
                 ax.annotate(
                     etiqueta,
                     (x + w / 2, y + h / 2),
@@ -140,14 +107,12 @@ def generar_pdf(ancho, alto, az_ancho, az_alto, junta):
                     clip_on=True
                 )
 
-        # Contorno real de la pared.
         ax.add_patch(Rectangle(
             (0, 0), ancho, alto,
             fill=False, edgecolor="black",
             linewidth=2
         ))
 
-        # Cotas generales.
         margen_x = ancho * 0.08
         margen_y = alto * 0.08
 
@@ -179,7 +144,6 @@ def generar_pdf(ancho, alto, az_ancho, az_alto, junta):
             va="center", fontsize=9
         )
 
-        # Panel informativo.
         y = 0.97
 
         def linea(texto, size=9, negrita=False, salto=0.045):
@@ -229,28 +193,45 @@ def generar_pdf(ancho, alto, az_ancho, az_alto, junta):
         pdf.savefig(fig, bbox_inches="tight")
         plt.close(fig)
 
-    print("\nPDF generado:", archivo)
-    print("Piezas totales:", len(piezas))
-    print("Piezas enteras:", enteras)
-    print("Piezas cortadas:", cortadas)
+    with open(pdf_path, "rb") as f:
+        pdf_bytes = f.read()
+    return pdf_bytes, piezas, enteras, cortadas
 
 
 def main():
-    print("=" * 45)
-    print("       CALCULADOR DE ALICATADO")
-    print("=" * 45)
-    print("Pared: introduce metros (1.8) o centímetros (180).")
-    print("Azulejos: centímetros.")
-    print("Junta: centímetros; 2 mm = 0.2 cm.\n")
+    st.set_page_config(page_title="Calculador de Alicatado", layout="centered")
+    
+    st.title("🧱 Calculador y Plano de Alicatado")
+    st.write("Introduce las medidas para generar el plano de colocación y el resumen de piezas.")
 
-    ancho = medida_pared("Ancho de la pared: ")
-    alto = medida_pared("Alto de la pared: ")
+    st.sidebar.header("Parámetros de Medida")
+    
+    # Entradas en centímetros para mayor precisión web
+    ancho_m = st.sidebar.number_input("Ancho de la pared (cm)", min_value=1.0, value=250.0, step=1.0)
+    alto_m = st.sidebar.number_input("Alto de la pared (cm)", min_value=1.0, value=220.0, step=1.0)
+    
+    az_ancho = st.sidebar.number_input("Ancho del azulejo (cm)", min_value=1.0, value=30.0, step=0.5)
+    az_alto = st.sidebar.number_input("Alto del azulejo (cm)", min_value=1.0, value=60.0, step=0.5)
+    junta_mm = st.sidebar.number_input("Junta (mm)", min_value=0.0, value=2.0, step=0.5)
+    junta = junta_mm / 10.0  # Pasar a cm
 
-    az_ancho = pedir_numero("Ancho del azulejo (cm): ")
-    az_alto = pedir_numero("Alto del azulejo (cm): ")
-    junta = pedir_numero("Junta (cm): ")
+    if st.sidebar.button("Generar Plano", type="primary"):
+        with st.spinner("Calculando y generando plano..."):
+            pdf_bytes, piezas, enteras, cortadas = generar_pdf_bytes(ancho_m, alto_m, az_ancho, az_alto, junta)
+            
+            st.success("¡Plano generado con éxito!")
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Piezas Totales", len(piezas))
+            col2.metric("Enteras", enteras)
+            col3.metric("Cortadas", cortadas)
 
-    generar_pdf(ancho, alto, az_ancho, az_alto, junta)
+            st.download_button(
+                label="📥 Descargar Plano en PDF",
+                data=pdf_bytes,
+                file_name="plano_azulejos.pdf",
+                mime="application/pdf"
+            )
 
 
 if __name__ == "__main__":
